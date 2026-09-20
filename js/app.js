@@ -19,7 +19,10 @@
     cscale: 0.15,
     sat: 0.72,
     val: 1.0,
+    glow: 0.35,
+    glowW: 0.02,
     ss: 2,
+    target: 64,
     olen: 60,
     showPoly: true,
     showOrbit: true,
@@ -64,6 +67,17 @@
   if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(prog));
   gl.useProgram(prog);
 
+  var present = gl.createProgram();
+  gl.attachShader(present, compile(gl.VERTEX_SHADER, SHADERS.VERT));
+  gl.attachShader(present, compile(gl.FRAGMENT_SHADER, SHADERS.PRESENT));
+  gl.bindAttribLocation(present, 0, 'aPos');
+  gl.linkProgram(present);
+  if (!gl.getProgramParameter(present, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(present));
+  var P = {
+    uAcc: gl.getUniformLocation(present, 'uAcc'),
+    uPasses: gl.getUniformLocation(present, 'uPasses')
+  };
+
   var vao = gl.createVertexArray();
   gl.bindVertexArray(vao);
   var buf = gl.createBuffer();
@@ -74,7 +88,8 @@
 
   var U = {};
   ['uKVerts', 'uHVerts', 'uN', 'uGeom', 'uIters', 'uMode', 'uStepPick', 'uSS', 'uCenter', 'uScale',
-    'uResolution', 'uHueShift', 'uCScale', 'uSat', 'uVal', 'uEps', 'uBg', 'uTable']
+    'uResolution', 'uHueShift', 'uCScale', 'uSat', 'uVal', 'uEps', 'uJitter', 'uGlow', 'uGlowW',
+    'uBg', 'uTable']
     .forEach(function (n) { U[n] = gl.getUniformLocation(prog, n); });
 
   /* --------------------------------------------------------- table layout */
@@ -114,6 +129,7 @@
       c.height = Math.round(H * dpr);
     });
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    allocAccum();
     render();
   }
 
@@ -134,11 +150,40 @@
 
   /* -------------------------------------------------------------- render */
 
-  var pending = false;
+  /*
+   * Cells can be far finer than a pixel, so one sample per pixel is pure aliasing.
+   * Each frame adds one jitter-offset pass into a float accumulation buffer and the
+   * image converges; any parameter change restarts it.
+   */
+  var accTex = null, accFbo = null, passes = 0, queued = false;
+  var canAccumulate = !!gl.getExtension('EXT_color_buffer_float');
+
+  function allocAccum() {
+    if (!canAccumulate) return;
+    if (accTex) { gl.deleteTexture(accTex); gl.deleteFramebuffer(accFbo); }
+    accTex = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, accTex);
+    gl.texStorage2D(gl.TEXTURE_2D, 1, gl.RGBA16F, glCanvas.width, glCanvas.height);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+    accFbo = gl.createFramebuffer();
+    gl.bindFramebuffer(gl.FRAMEBUFFER, accFbo);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, accTex, 0);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  }
+
+  function samplesPerPixel() { return passes * state.ss * state.ss; }
+
+  /* Restart the accumulation; call after anything that changes the image. */
   function render() {
-    if (pending) return;
-    pending = true;
-    requestAnimationFrame(function () { pending = false; draw(); });
+    passes = 0;
+    schedule();
+  }
+
+  function schedule() {
+    if (queued) return;
+    queued = true;
+    requestAnimationFrame(function () { queued = false; draw(); });
   }
 
   function draw() {
@@ -149,6 +194,7 @@
       flatH[3 * i] = hverts[i][0]; flatH[3 * i + 1] = hverts[i][1]; flatH[3 * i + 2] = hverts[i][2];
     }
 
+    var first = passes === 0;
     gl.viewport(0, 0, glCanvas.width, glCanvas.height);
     gl.useProgram(prog);
     gl.bindVertexArray(vao);
@@ -168,11 +214,36 @@
     gl.uniform1f(U.uSat, state.sat);
     gl.uniform1f(U.uVal, state.val);
     gl.uniform1f(U.uEps, state.eps);
+    gl.uniform1f(U.uGlow, state.glow);
+    gl.uniform1f(U.uGlowW, state.glowW);
     gl.uniform3f(U.uBg, 0.039, 0.047, 0.071);
     gl.uniform3f(U.uTable, 0.93, 0.95, 1.0);
-    gl.drawArrays(gl.TRIANGLES, 0, 3);
+    gl.uniform2f(U.uJitter, first ? 0.5 : Math.random(), first ? 0.5 : Math.random());
 
-    drawOverlay();
+    if (!canAccumulate) {
+      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      gl.drawArrays(gl.TRIANGLES, 0, 3);
+      passes = 1;
+    } else {
+      gl.bindFramebuffer(gl.FRAMEBUFFER, accFbo);
+      if (first) { gl.disable(gl.BLEND); gl.clearColor(0, 0, 0, 1); gl.clear(gl.COLOR_BUFFER_BIT); }
+      gl.enable(gl.BLEND);
+      gl.blendFunc(gl.ONE, gl.ONE);
+      gl.drawArrays(gl.TRIANGLES, 0, 3);
+      gl.disable(gl.BLEND);
+      passes++;
+
+      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      gl.useProgram(present);
+      gl.activeTexture(gl.TEXTURE0);
+      gl.bindTexture(gl.TEXTURE_2D, accTex);
+      gl.uniform1i(P.uAcc, 0);
+      gl.uniform1f(P.uPasses, passes);
+      gl.drawArrays(gl.TRIANGLES, 0, 3);
+    }
+
+    if (first) drawOverlay(); else updateHud();
+    if (samplesPerPixel() < state.target) schedule();
   }
 
   function strokeGeodesic(a, b) {
@@ -248,10 +319,12 @@
   var cursor = [0, 0];
   function updateHud() {
     var z = cursor;
-    var inside = state.model.valid(z);
+    var inDisk = state.model.valid(z);
+    var spp = samplesPerPixel();
     hud.textContent = 'z = ' + z[0].toFixed(4) + (z[1] < 0 ? ' - ' : ' + ')
       + Math.abs(z[1]).toFixed(4) + 'i'
-      + (inside ? '   d(0,z) = ' + state.model.radius(z).toFixed(3) : '   (ideal exterior)')
+      + (inDisk ? '   d(0,z) = ' + state.model.radius(z).toFixed(3) : '   (ideal exterior)')
+      + '   ' + spp + (spp < state.target ? '/' + state.target : '') + ' spp'
       + orbitInfo;
   }
 
@@ -355,7 +428,11 @@
   bind('cscale', 'vCScale', function (v) { state.cscale = v; }, function (v) { return v.toFixed(3); });
   bind('sat', 'vSat', function (v) { state.sat = v; }, function (v) { return v.toFixed(2); });
   bind('val', 'vVal', function (v) { state.val = v; }, function (v) { return v.toFixed(2); });
+  bind('glow', 'vGlow', function (v) { state.glow = v; }, function (v) { return v.toFixed(2); });
+  bind('glowW', 'vGlowW', function (v) { state.glowW = v; }, function (v) { return v.toFixed(3); });
   bind('ss', 'vSS', function (v) { state.ss = v; }, function (v) { return v + '\u00d7' + v; });
+  bind('target', 'vTarget', function (v) { state.target = Math.pow(2, v); },
+       function (v) { return String(Math.pow(2, v)); });
   bind('olen', 'vOlen', function (v) { state.olen = v; });
   bind('showPoly', null, function (v) { state.showPoly = v; });
   bind('showOrbit', null, function (v) { state.showOrbit = v; });

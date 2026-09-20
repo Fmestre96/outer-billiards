@@ -78,7 +78,16 @@
     <label>Brightness <span class="val" id="vVal">1.00</span>
       <input type="range" id="val" min="0.2" max="1.4" step="0.01" value="1" />
     </label>
-    <label>Supersampling <span class="val" id="vSS">2&times;2</span>
+    <label>Singularity glow <span class="val" id="vGlow">0.35</span>
+      <input type="range" id="glow" min="0" max="1.5" step="0.01" value="0.35" />
+    </label>
+    <label>Glow width <span class="val" id="vGlowW">0.020</span>
+      <input type="range" id="glowW" min="0.002" max="0.2" step="0.002" value="0.02" />
+    </label>
+    <label>Samples / pixel <span class="val" id="vTarget">64</span>
+      <input type="range" id="target" min="0" max="10" step="1" value="6" />
+    </label>
+    <label>Per frame <span class="val" id="vSS">2&times;2</span>
       <input type="range" id="ss" min="1" max="4" step="1" value="2" />
     </label>
   </section>

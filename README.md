@@ -37,7 +37,11 @@ straight chords — the same cross-product code then serves both geometries.
 - Drag the white handles to deform the table; sliders set sides, circumradius, twist.
 - Scroll to zoom, drag the background to pan.
 - Click outside the table to trace a single orbit (period and symbols show in the HUD).
-- Supersampling 1×–4×, hue/saturation/brightness, PNG export.
+- Progressive rendering: each frame adds a jittered sample per pixel until the chosen
+  samples/pixel target is reached, so sub-pixel cell structure resolves instead of aliasing.
+- Singularity glow: highlights orbits that pass close to the singular set, where the tangent
+  line contains a whole edge and the support vertex is ambiguous. This outlines every cell.
+- Hue/saturation/brightness, PNG export.
 
 ## Running locally
 
