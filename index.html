@@ -43,8 +43,14 @@
 
   <section>
     <h2>Dynamics</h2>
-    <label>Iterations <span class="val" id="vIters">40</span>
-      <input type="range" id="iters" min="1" max="10000" step="1" value="40" />
+    <label>Iterations <span class="val" id="vIters">300</span>
+      <input type="range" id="iters" min="1" max="1000" step="1" value="300" />
+    </label>
+    <label class="row"><input type="checkbox" id="autoRefine" /> auto-refine iterations</label>
+    <p class="hint">Raises iterations once each pass converges, until the picture stops
+      changing. Hues stay put because they are fixed by the colour depth below.</p>
+    <label>Colour depth <span class="val" id="vHueDepth">32</span>
+      <input type="range" id="hueDepth" min="1" max="200" step="1" value="32" />
     </label>
     <label>Colouring
       <select id="mode">
@@ -58,14 +64,14 @@
       </select>
     </label>
     <label id="stepRow" class="off">Step k <span class="val" id="vStep">1</span>
-      <input type="range" id="step" min="1" max="10000" step="1" value="1" />
+      <input type="range" id="step" min="1" max="1000" step="1" value="1" />
     </label>
     <label id="epsRow" class="off">Return tolerance <span class="val" id="vEps">1e-6</span>
       <input type="range" id="eps" min="-12" max="-2" step="0.25" value="-6" />
     </label>
   </section>
-  <section>
-    <h2>Colour</h2>
+  <details class="group">
+    <summary>Colour</summary>
     <label>Hue shift <span class="val" id="vHue">0.00</span>
       <input type="range" id="hue" min="0" max="1" step="0.005" value="0" />
     </label>
@@ -96,13 +102,13 @@
     <label>Per frame <span class="val" id="vSS">2&times;2</span>
       <input type="range" id="ss" min="1" max="4" step="1" value="2" />
     </label>
-  </section>
+  </details>
 
   <section>
     <h2>Orbit probe</h2>
     <p class="hint">Click anywhere outside the table to trace a single orbit.</p>
     <label>Orbit length <span class="val" id="vOlen">60</span>
-      <input type="range" id="olen" min="2" max="10000" step="1" value="60" />
+      <input type="range" id="olen" min="2" max="1000" step="1" value="60" />
     </label>
     <label class="row"><input type="checkbox" id="showPoly" checked /> show table &amp; handles</label>
     <label class="row"><input type="checkbox" id="showOrbit" checked /> show orbit</label>

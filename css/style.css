@@ -118,6 +118,25 @@ body {
   border-top: 1px solid var(--line);
 }
 
+#panel details.group {
+  margin-top: 14px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+}
+
+#panel summary {
+  cursor: pointer;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--accent);
+  list-style: none;
+}
+
+#panel summary::-webkit-details-marker { display: none; }
+#panel summary::before { content: '\25B8  '; }
+#panel details[open] summary::before { content: '\25BE  '; }
+
 #panel h2 {
   margin: 0 0 8px;
   font-size: 11px;

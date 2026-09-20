@@ -11,7 +11,9 @@
     sides: 5,
     radius: HB.MODELS.hyperbolic.defaultRadius,
     twist: 0,
-    iters: 40,
+    iters: 300,
+    hueDepth: 32,
+    autoRefine: false,
     mode: 1,
     stepPick: 1,
     eps: 1e-6,
@@ -98,8 +100,9 @@
 
   var U = {}, UD = {};
   var UNIFORMS = ['uKVerts', 'uKVertsLo', 'uHVerts', 'uHVertsLo', 'uN', 'uGeom', 'uIters', 'uMode',
-    'uStepPick', 'uSS', 'uCenter', 'uCenterLo', 'uScale', 'uResolution', 'uHueShift', 'uCScale',
-    'uSat', 'uVal', 'uEps', 'uJitter', 'uGlow', 'uGlowW', 'uShade', 'uShadeScale', 'uBg', 'uTable'];
+    'uHueDepth', 'uStepPick', 'uSS', 'uCenter', 'uCenterLo', 'uScale', 'uResolution', 'uHueShift',
+    'uCScale', 'uSat', 'uVal', 'uEps', 'uJitter', 'uGlow', 'uGlowW', 'uShade', 'uShadeScale',
+    'uBg', 'uTable'];
   UNIFORMS.forEach(function (n) {
     U[n] = gl.getUniformLocation(prog, n);
     UD[n] = gl.getUniformLocation(deepProg, n);
@@ -195,7 +198,6 @@
     passes = 0;
     schedule();
   }
-
   function schedule() {
     if (queued) return;
     queued = true;
@@ -233,6 +235,7 @@
     gl.uniform1i(L.uN, n);
     gl.uniform1i(L.uGeom, state.model.id);
     gl.uniform1i(L.uIters, state.iters);
+    gl.uniform1i(L.uHueDepth, state.hueDepth);
     gl.uniform1i(L.uMode, state.mode);
     gl.uniform1i(L.uStepPick, state.stepPick);
     gl.uniform1i(L.uSS, state.ss);
@@ -276,7 +279,44 @@
     }
 
     if (first) drawOverlay(); else updateHud();
-    if (samplesPerPixel() < state.target) schedule();
+    if (samplesPerPixel() < state.target) { schedule(); return; }
+    if (state.autoRefine) refine();
+  }
+
+  /*
+   * Deeper orbits subdivide cells, so raising the iteration count is what reveals finer
+   * structure. Hues are keyed to the colour-depth prefix and so stay fixed while this runs.
+   * Stops once a level changes the image by less than a quantisation step.
+   */
+  var REFINE_STEP = 1.6, REFINE_MAX = 1000;
+  var lastFrame = null;
+
+  function refine() {
+    if (state.iters >= REFINE_MAX) return;
+
+    // centred sample of the resolved image; the accumulation buffer holds unnormalised floats
+    var w = Math.max(1, glCanvas.width >> 1), h = Math.max(1, glCanvas.height >> 1);
+    var buf = new Uint8Array(w * h * 4);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    while (gl.getError() !== gl.NO_ERROR) { /* drain */ }
+    gl.readPixels(w >> 1, h >> 1, w, h, gl.RGBA, gl.UNSIGNED_BYTE, buf);
+    var readable = gl.getError() === gl.NO_ERROR;
+
+    if (readable && lastFrame && lastFrame.length === buf.length) {
+      var diff = 0;
+      for (var i = 0; i < buf.length; i += 4) {
+        diff += Math.abs(buf[i] - lastFrame[i]) + Math.abs(buf[i + 1] - lastFrame[i + 1])
+              + Math.abs(buf[i + 2] - lastFrame[i + 2]);
+      }
+      if (diff / (buf.length / 4) < 1.0) { lastFrame = buf; return; }
+    }
+    lastFrame = readable ? buf : null;
+
+    state.iters = Math.min(REFINE_MAX, Math.ceil(state.iters * REFINE_STEP));
+    var el = document.getElementById('iters');
+    el.value = state.iters;
+    document.getElementById('vIters').textContent = state.iters;
+    render();
   }
 
   function strokeGeodesic(a, b) {
@@ -457,6 +497,8 @@
   bind('radius', 'vRad', function (v) { state.radius = v; makeRegular(); }, function (v) { return v.toFixed(2); });
   bind('twist', 'vTwist', function (v) { state.twist = v * Math.PI / 180; makeRegular(); }, function (v) { return v + '\u00b0'; });
   bind('iters', 'vIters', function (v) { state.iters = v; });
+  bind('hueDepth', 'vHueDepth', function (v) { state.hueDepth = v; });
+  bind('autoRefine', null, function (v) { state.autoRefine = v; lastFrame = null; });
   bind('step', 'vStep', function (v) { state.stepPick = v; });
   bind('eps', 'vEps', function (v) { state.eps = Math.pow(10, v); }, function (v) { return Math.pow(10, v).toExponential(1); });
   bind('hue', 'vHue', function (v) { state.hue = v; }, function (v) { return v.toFixed(3); });
