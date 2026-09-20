@@ -48,10 +48,7 @@
     </label>
     <label class="row"><input type="checkbox" id="autoRefine" /> auto-refine iterations</label>
     <p class="hint">Raises iterations once each pass converges, until the picture stops
-      changing. Hues stay put because they are fixed by the colour depth below.</p>
-    <label>Colour depth <span class="val" id="vHueDepth">32</span>
-      <input type="range" id="hueDepth" min="1" max="200" step="1" value="32" />
-    </label>
+      changing. Colours are keyed to the whole itinerary, so they shift as it refines.</p>
     <label>Colouring
       <select id="mode">
         <option value="0">Itinerary (smooth)</option>
@@ -119,7 +116,9 @@
     <h2>View</h2>
     <button id="resetView">Reset view</button>
     <button id="savePng">Save PNG</button>
-    <p class="hint">Scroll to zoom, drag the background to pan.</p>
+    <label class="row"><input type="checkbox" id="hypPan" checked /> move by isometry</label>
+    <p class="hint">Scroll to zoom, drag the background to pan. Isometry navigation keeps the
+      scene at constant size as you travel, instead of shrinking it into the boundary.</p>
   </section>
 </aside>
 

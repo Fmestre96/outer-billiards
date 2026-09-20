@@ -48,6 +48,96 @@ var HB = (function () {
     return [x / w, y / w];
   }
 
+  /*
+   * Camera as a Lorentz transform. The billiard map is equivariant under isometries,
+   * T(C^-1 P)(w) = C^-1 T(P)(C w), so moving the camera is the same as moving the table:
+   * panning applies C^-1 to the vertices and the shader never has to know.
+   */
+  var ETA = [1, 1, -1];
+
+  function fromHyp(X) { return [X[0] / (1 + X[2]), X[1] / (1 + X[2])]; }
+
+  function mdot(a, b) { return a[0] * b[0] + a[1] * b[1] - a[2] * b[2]; }
+
+  function hypNormalize(X) {
+    var n = Math.sqrt(Math.max(-mdot(X, X), 1e-300));
+    return [X[0] / n, X[1] / n, X[2] / n];
+  }
+
+  function matIdentity() { return [1, 0, 0, 0, 1, 0, 0, 0, 1]; }
+
+  function matApply(M, X) {
+    return [M[0] * X[0] + M[1] * X[1] + M[2] * X[2],
+            M[3] * X[0] + M[4] * X[1] + M[5] * X[2],
+            M[6] * X[0] + M[7] * X[1] + M[8] * X[2]];
+  }
+
+  function matMul(A, B) {
+    var C = new Array(9);
+    for (var i = 0; i < 3; i++) {
+      for (var j = 0; j < 3; j++) {
+        C[3 * i + j] = A[3 * i] * B[j] + A[3 * i + 1] * B[3 + j] + A[3 * i + 2] * B[6 + j];
+      }
+    }
+    return C;
+  }
+
+  /* Lorentz matrices satisfy L^T eta L = eta, so the inverse is just eta L^T eta. */
+  function matInverse(L) {
+    var M = new Array(9);
+    for (var i = 0; i < 3; i++) {
+      for (var j = 0; j < 3; j++) M[3 * i + j] = ETA[i] * ETA[j] * L[3 * j + i];
+    }
+    return M;
+  }
+
+  /* Point reflection through V as a matrix: X -> -(X + 2<X,V>V). */
+  function reflectMatrix(V) {
+    var M = new Array(9);
+    for (var i = 0; i < 3; i++) {
+      for (var j = 0; j < 3; j++) {
+        M[3 * i + j] = -((i === j ? 1 : 0) + 2 * V[i] * V[j] * ETA[j]);
+      }
+    }
+    return M;
+  }
+
+  /* Translation carrying A to B along their geodesic: the reflection in the midpoint
+     composed with the reflection in A. */
+  function translation(A, B) {
+    if (Math.abs(mdot(A, B) + 1) < 1e-18) return matIdentity();
+    var mid = hypNormalize([A[0] + B[0], A[1] + B[1], A[2] + B[2]]);
+    return matMul(reflectMatrix(mid), reflectMatrix(A));
+  }
+
+  /*
+   * Gram-Schmidt in the Minkowski metric. Composing translations lets rounding drift the
+   * camera off the Lorentz group, and since its entries grow like cosh(d) the violation
+   * grows like e^(2d); re-orthonormalising each step keeps the table from shearing.
+   */
+  function matOrthonormalize(L) {
+    var col = [[L[0], L[3], L[6]], [L[1], L[4], L[7]], [L[2], L[5], L[8]]];
+    var t = hypNormalize(col[2]);                       // timelike, <t,t> = -1
+    var out = [null, null, t];
+    for (var i = 0; i < 2; i++) {
+      var v = col[i].slice();
+      var dt = mdot(v, t);
+      for (var a = 0; a < 3; a++) v[a] += dt * t[a];    // remove the timelike part
+      if (i === 1) {
+        var d0 = mdot(v, out[0]);
+        for (var b = 0; b < 3; b++) v[b] -= d0 * out[0][b];
+      }
+      var n = Math.sqrt(Math.max(mdot(v, v), 1e-300));
+      out[i] = [v[0] / n, v[1] / n, v[2] / n];
+    }
+    return [out[0][0], out[1][0], out[2][0],
+            out[0][1], out[1][1], out[2][1],
+            out[0][2], out[1][2], out[2][2]];
+  }
+
+  /* How far the camera has travelled: the image of the origin is the third column. */
+  function matTravel(L) { return Math.acosh(Math.max(1, L[8])); }
+
   function cross(ax, ay, bx, by) { return ax * by - ay * bx; }
 
   /* Index of the vertex whose geodesic through kp keeps the whole table on the left. */
@@ -182,6 +272,9 @@ var HB = (function () {
     hypRadius: hypRadius, euclidRadius: euclidRadius,
     supportVertex: supportVertex,
     insideKlein: insideKlein, signedAreaKlein: signedAreaKlein, isConvexKlein: isConvexKlein,
-    regularPolygon: regularPolygon, orbit: orbit
+    regularPolygon: regularPolygon, orbit: orbit,
+    fromHyp: fromHyp, matIdentity: matIdentity, matApply: matApply, matMul: matMul,
+    matInverse: matInverse, translation: translation,
+    matOrthonormalize: matOrthonormalize, matTravel: matTravel
   };
 })();

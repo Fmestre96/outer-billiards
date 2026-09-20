@@ -12,7 +12,7 @@
     radius: HB.MODELS.hyperbolic.defaultRadius,
     twist: 0,
     iters: 300,
-    hueDepth: 32,
+    hypPan: true,
     autoRefine: false,
     mode: 1,
     stepPick: 1,
@@ -33,6 +33,7 @@
     seed: null,
     center: [0, 0],
     scale: 1 / 300,
+    cam: HB.matIdentity(),
     deep: false,
     convex: true
   };
@@ -100,7 +101,8 @@
 
   var U = {}, UD = {};
   var UNIFORMS = ['uKVerts', 'uKVertsLo', 'uHVerts', 'uHVertsLo', 'uN', 'uGeom', 'uIters', 'uMode',
-    'uHueDepth', 'uStepPick', 'uSS', 'uCenter', 'uCenterLo', 'uScale', 'uResolution', 'uHueShift',
+    'uStepPick', 'uSS', 'uCenter', 'uCenterLo', 'uScale',
+    'uResolution', 'uHueShift',
     'uCScale', 'uSat', 'uVal', 'uEps', 'uJitter', 'uGlow', 'uGlowW', 'uShade', 'uShadeScale',
     'uBg', 'uTable'];
   UNIFORMS.forEach(function (n) {
@@ -115,18 +117,34 @@
 
   var kverts = [];
   var hverts = [];
+  var viewVerts = [];   // vertices after the camera transform; what is drawn and iterated
 
   function rebuildTable() {
     // orient counter-clockwise so the tangency and inside tests agree
-    var k = state.verts.map(state.model.proj);
-    if (HB.signedAreaKlein(k) < 0) {
-      state.verts.reverse();
-      k = state.verts.map(state.model.proj);
+    if (HB.signedAreaKlein(state.verts.map(state.model.proj)) < 0) state.verts.reverse();
+
+    if (state.model.id === 0) {
+      // the camera is applied on the hyperboloid and Klein coordinates are read off
+      // directly; going via Poincare would reintroduce the 1-|z| cancellation past d ~ 10
+      hverts = state.verts.map(function (v) {
+        return HB.matApply(state.cam, state.model.lift(v));
+      });
+      kverts = hverts.map(function (X) { return [X[0] / X[2], X[1] / X[2]]; });
+      viewVerts = hverts.map(HB.fromHyp);
+    } else {
+      viewVerts = state.verts;
+      kverts = viewVerts.map(state.model.proj);
+      hverts = viewVerts.map(state.model.lift);
     }
-    kverts = k;
-    hverts = state.verts.map(state.model.lift);
-    state.convex = HB.isConvexKlein(k);
+
+    state.convex = HB.isConvexKlein(kverts);
     warn.classList.toggle('hidden', state.convex);
+  }
+
+  /* Screen point -> vertex in the untransformed table frame. */
+  function toTableFrame(z) {
+    if (state.model.id !== 0) return z;
+    return HB.fromHyp(HB.matApply(HB.matInverse(state.cam), state.model.lift(z)));
   }
 
   function makeRegular() {
@@ -155,6 +173,8 @@
   function fitView() {
     state.center = [0, 0];
     state.scale = state.model.extent / (0.5 * Math.min(W, H));
+    state.cam = HB.matIdentity();
+    rebuildTable();
   }
 
   function toScreen(z) {
@@ -235,7 +255,6 @@
     gl.uniform1i(L.uN, n);
     gl.uniform1i(L.uGeom, state.model.id);
     gl.uniform1i(L.uIters, state.iters);
-    gl.uniform1i(L.uHueDepth, state.hueDepth);
     gl.uniform1i(L.uMode, state.mode);
     gl.uniform1i(L.uStepPick, state.stepPick);
     gl.uniform1i(L.uSS, state.ss);
@@ -347,11 +366,11 @@
     if (state.showPoly) {
       ctx.strokeStyle = 'rgba(20,24,34,0.9)';
       ctx.lineWidth = 2;
-      for (var i = 0; i < state.verts.length; i++) {
-        strokeGeodesic(state.verts[i], state.verts[(i + 1) % state.verts.length]);
+      for (var i = 0; i < viewVerts.length; i++) {
+        strokeGeodesic(viewVerts[i], viewVerts[(i + 1) % viewVerts.length]);
       }
-      for (var j = 0; j < state.verts.length; j++) {
-        var s = toScreen(state.verts[j]);
+      for (var j = 0; j < viewVerts.length; j++) {
+        var s = toScreen(viewVerts[j]);
         ctx.beginPath();
         ctx.arc(s[0], s[1], 5, 0, 2 * Math.PI);
         ctx.fillStyle = '#ffffff';
@@ -399,6 +418,8 @@
       + (inDisk ? '   d(0,z) = ' + state.model.radius(z).toFixed(3) : '   (ideal exterior)')
       + '   zoom ' + (state.model.extent / (0.5 * Math.min(W, H)) / state.scale).toExponential(1)
       + (state.deep ? ' (deep)' : '')
+      + (state.model.id === 0 && HB.matTravel(state.cam) > 0.005
+          ? '   travelled ' + HB.matTravel(state.cam).toFixed(2) : '')
       + '   ' + spp + (spp < state.target ? '/' + state.target : '') + ' spp'
       + orbitInfo;
   }
@@ -408,8 +429,8 @@
   var drag = null;
 
   function hitVertex(px, py) {
-    for (var i = 0; i < state.verts.length; i++) {
-      var s = toScreen(state.verts[i]);
+    for (var i = 0; i < viewVerts.length; i++) {
+      var s = toScreen(viewVerts[i]);
       if (Math.hypot(s[0] - px, s[1] - py) < 9) return i;
     }
     return -1;
@@ -424,9 +445,23 @@
     var p = localPos(e);
     ov.setPointerCapture(e.pointerId);
     var vi = state.showPoly ? hitVertex(p[0], p[1]) : -1;
-    drag = { mode: vi >= 0 ? 'vertex' : 'pan', vi: vi, start: p, moved: false,
+    drag = { mode: vi >= 0 ? 'vertex' : 'pan', vi: vi, start: p, prev: p, moved: false,
              center0: state.center.slice() };
   });
+
+  /* Drags the scene along the geodesic from a to b, so the grabbed point follows the cursor. */
+  var MAX_TRAVEL = 15;   // past this the camera entries outgrow float64, see matOrthonormalize
+
+  function panHyperbolic(a, b) {
+    var lift = state.model.lift;
+    if (!state.model.valid(a) || !state.model.valid(b)) return;
+    var T = HB.translation(lift(a), lift(b));
+    var next = HB.matOrthonormalize(HB.matMul(T, state.cam));
+    if (HB.matTravel(next) > MAX_TRAVEL && HB.matTravel(next) > HB.matTravel(state.cam)) return;
+    state.cam = next;
+    if (state.seed) state.seed = HB.fromHyp(HB.matApply(T, lift(state.seed)));
+    rebuildTable();
+  }
 
   ov.addEventListener('pointermove', function (e) {
     var p = localPos(e);
@@ -440,12 +475,16 @@
     if (Math.hypot(p[0] - drag.start[0], p[1] - drag.start[1]) > 3) drag.moved = true;
 
     if (drag.mode === 'vertex') {
-      state.verts[drag.vi] = state.model.clamp(toDisk(p[0], p[1]));
+      viewVerts[drag.vi] = state.model.clamp(toDisk(p[0], p[1]));
+      state.verts[drag.vi] = toTableFrame(viewVerts[drag.vi]);
       rebuildTable();
+    } else if (state.model.id === 0 && state.hypPan) {
+      panHyperbolic(toDisk(drag.prev[0], drag.prev[1]), toDisk(p[0], p[1]));
     } else {
       state.center = [drag.center0[0] - (p[0] - drag.start[0]) * state.scale,
                       drag.center0[1] + (p[1] - drag.start[1]) * state.scale];
     }
+    drag.prev = p;
     render();
   });
 
@@ -497,7 +536,7 @@
   bind('radius', 'vRad', function (v) { state.radius = v; makeRegular(); }, function (v) { return v.toFixed(2); });
   bind('twist', 'vTwist', function (v) { state.twist = v * Math.PI / 180; makeRegular(); }, function (v) { return v + '\u00b0'; });
   bind('iters', 'vIters', function (v) { state.iters = v; });
-  bind('hueDepth', 'vHueDepth', function (v) { state.hueDepth = v; });
+  bind('hypPan', null, function (v) { state.hypPan = v; });
   bind('autoRefine', null, function (v) { state.autoRefine = v; lastFrame = null; });
   bind('step', 'vStep', function (v) { state.stepPick = v; });
   bind('eps', 'vEps', function (v) { state.eps = Math.pow(10, v); }, function (v) { return Math.pow(10, v).toExponential(1); });
@@ -575,17 +614,20 @@
     saved[state.model.name] = {
       verts: state.verts.map(function (v) { return v.slice(); }),
       sides: state.sides, radius: state.radius, twist: state.twist,
-      center: state.center.slice(), scale: state.scale, seed: state.seed
+      center: state.center.slice(), scale: state.scale, seed: state.seed,
+      cam: state.cam.slice()
     };
     state.model = HB.MODELS[name];
     var s = saved[name];
     if (s) {
       state.verts = s.verts; state.sides = s.sides; state.radius = s.radius; state.twist = s.twist;
       state.center = s.center; state.scale = s.scale; state.seed = s.seed;
+      state.cam = s.cam;
       rebuildTable();
     } else {
       state.radius = state.model.defaultRadius;
       state.seed = null;
+      state.cam = HB.matIdentity();
       makeRegular();
       fitView();
     }
