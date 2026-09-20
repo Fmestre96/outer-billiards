@@ -21,6 +21,8 @@
     val: 1.0,
     glow: 0.35,
     glowW: 0.02,
+    shade: 0.55,
+    shadeScale: 0.12,
     ss: 2,
     target: 64,
     olen: 60,
@@ -29,6 +31,7 @@
     seed: null,
     center: [0, 0],
     scale: 1 / 300,
+    deep: false,
     convex: true
   };
 
@@ -67,6 +70,13 @@
   if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(prog));
   gl.useProgram(prog);
 
+  var deepProg = gl.createProgram();
+  gl.attachShader(deepProg, compile(gl.VERTEX_SHADER, SHADERS.VERT));
+  gl.attachShader(deepProg, compile(gl.FRAGMENT_SHADER, SHADERS.FRAG_DEEP));
+  gl.bindAttribLocation(deepProg, 0, 'aPos');
+  gl.linkProgram(deepProg);
+  if (!gl.getProgramParameter(deepProg, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(deepProg));
+
   var present = gl.createProgram();
   gl.attachShader(present, compile(gl.VERTEX_SHADER, SHADERS.VERT));
   gl.attachShader(present, compile(gl.FRAGMENT_SHADER, SHADERS.PRESENT));
@@ -86,11 +96,17 @@
   gl.enableVertexAttribArray(0);
   gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
 
-  var U = {};
-  ['uKVerts', 'uHVerts', 'uN', 'uGeom', 'uIters', 'uMode', 'uStepPick', 'uSS', 'uCenter', 'uScale',
-    'uResolution', 'uHueShift', 'uCScale', 'uSat', 'uVal', 'uEps', 'uJitter', 'uGlow', 'uGlowW',
-    'uBg', 'uTable']
-    .forEach(function (n) { U[n] = gl.getUniformLocation(prog, n); });
+  var U = {}, UD = {};
+  var UNIFORMS = ['uKVerts', 'uKVertsLo', 'uHVerts', 'uHVertsLo', 'uN', 'uGeom', 'uIters', 'uMode',
+    'uStepPick', 'uSS', 'uCenter', 'uCenterLo', 'uScale', 'uResolution', 'uHueShift', 'uCScale',
+    'uSat', 'uVal', 'uEps', 'uJitter', 'uGlow', 'uGlowW', 'uShade', 'uShadeScale', 'uBg', 'uTable'];
+  UNIFORMS.forEach(function (n) {
+    U[n] = gl.getUniformLocation(prog, n);
+    UD[n] = gl.getUniformLocation(deepProg, n);
+  });
+
+  // float32 starts misclassifying cells once a pixel spans less than about 1e-6
+  var DEEP_THRESHOLD = 2e-6;
 
   /* --------------------------------------------------------- table layout */
 
@@ -187,38 +203,55 @@
   }
 
   function draw() {
-    var flatK = new Float32Array(MAXV * 2);
-    var flatH = new Float32Array(MAXV * 3);
-    for (var i = 0; i < state.verts.length && i < MAXV; i++) {
-      flatK[2 * i] = kverts[i][0]; flatK[2 * i + 1] = kverts[i][1];
-      flatH[3 * i] = hverts[i][0]; flatH[3 * i + 1] = hverts[i][1]; flatH[3 * i + 2] = hverts[i][2];
+    var n = Math.min(state.verts.length, MAXV);
+    var flatK = new Float32Array(MAXV * 2), flatKLo = new Float32Array(MAXV * 2);
+    var flatH = new Float32Array(MAXV * 3), flatHLo = new Float32Array(MAXV * 3);
+    for (var i = 0; i < n; i++) {
+      for (var a = 0; a < 2; a++) {
+        var hi = Math.fround(kverts[i][a]);
+        flatK[2 * i + a] = hi; flatKLo[2 * i + a] = kverts[i][a] - hi;
+      }
+      for (var b = 0; b < 3; b++) {
+        var hh = Math.fround(hverts[i][b]);
+        flatH[3 * i + b] = hh; flatHLo[3 * i + b] = hverts[i][b] - hh;
+      }
     }
+    var cx = Math.fround(state.center[0]), cy = Math.fround(state.center[1]);
+
+    state.deep = state.scale < DEEP_THRESHOLD;
+    var p = state.deep ? deepProg : prog;
+    var L = state.deep ? UD : U;
 
     var first = passes === 0;
     gl.viewport(0, 0, glCanvas.width, glCanvas.height);
-    gl.useProgram(prog);
+    gl.useProgram(p);
     gl.bindVertexArray(vao);
-    gl.uniform2fv(U.uKVerts, flatK);
-    gl.uniform3fv(U.uHVerts, flatH);
-    gl.uniform1i(U.uN, Math.min(state.verts.length, MAXV));
-    gl.uniform1i(U.uGeom, state.model.id);
-    gl.uniform1i(U.uIters, state.iters);
-    gl.uniform1i(U.uMode, state.mode);
-    gl.uniform1i(U.uStepPick, state.stepPick);
-    gl.uniform1i(U.uSS, state.ss);
-    gl.uniform2f(U.uCenter, state.center[0], state.center[1]);
-    gl.uniform1f(U.uScale, state.scale / dpr);
-    gl.uniform2f(U.uResolution, glCanvas.width, glCanvas.height);
-    gl.uniform1f(U.uHueShift, state.hue);
-    gl.uniform1f(U.uCScale, state.cscale);
-    gl.uniform1f(U.uSat, state.sat);
-    gl.uniform1f(U.uVal, state.val);
-    gl.uniform1f(U.uEps, state.eps);
-    gl.uniform1f(U.uGlow, state.glow);
-    gl.uniform1f(U.uGlowW, state.glowW);
-    gl.uniform3f(U.uBg, 0.039, 0.047, 0.071);
-    gl.uniform3f(U.uTable, 0.93, 0.95, 1.0);
-    gl.uniform2f(U.uJitter, first ? 0.5 : Math.random(), first ? 0.5 : Math.random());
+    gl.uniform2fv(L.uKVerts, flatK);
+    gl.uniform2fv(L.uKVertsLo, flatKLo);
+    gl.uniform3fv(L.uHVerts, flatH);
+    gl.uniform3fv(L.uHVertsLo, flatHLo);
+    gl.uniform1i(L.uN, n);
+    gl.uniform1i(L.uGeom, state.model.id);
+    gl.uniform1i(L.uIters, state.iters);
+    gl.uniform1i(L.uMode, state.mode);
+    gl.uniform1i(L.uStepPick, state.stepPick);
+    gl.uniform1i(L.uSS, state.ss);
+    gl.uniform2f(L.uCenter, cx, cy);
+    gl.uniform2f(L.uCenterLo, state.center[0] - cx, state.center[1] - cy);
+    gl.uniform1f(L.uScale, state.scale / dpr);
+    gl.uniform2f(L.uResolution, glCanvas.width, glCanvas.height);
+    gl.uniform1f(L.uHueShift, state.hue);
+    gl.uniform1f(L.uCScale, state.cscale);
+    gl.uniform1f(L.uSat, state.sat);
+    gl.uniform1f(L.uVal, state.val);
+    gl.uniform1f(L.uEps, state.eps);
+    gl.uniform1f(L.uGlow, state.glow);
+    gl.uniform1f(L.uGlowW, state.glowW);
+    gl.uniform1f(L.uShade, state.shade);
+    gl.uniform1f(L.uShadeScale, state.shadeScale);
+    gl.uniform3f(L.uBg, 0.039, 0.047, 0.071);
+    gl.uniform3f(L.uTable, 0.93, 0.95, 1.0);
+    gl.uniform2f(L.uJitter, first ? 0.5 : Math.random(), first ? 0.5 : Math.random());
 
     if (!canAccumulate) {
       gl.bindFramebuffer(gl.FRAMEBUFFER, null);
@@ -324,6 +357,8 @@
     hud.textContent = 'z = ' + z[0].toFixed(4) + (z[1] < 0 ? ' - ' : ' + ')
       + Math.abs(z[1]).toFixed(4) + 'i'
       + (inDisk ? '   d(0,z) = ' + state.model.radius(z).toFixed(3) : '   (ideal exterior)')
+      + '   zoom ' + (state.model.extent / (0.5 * Math.min(W, H)) / state.scale).toExponential(1)
+      + (state.deep ? ' (deep)' : '')
       + '   ' + spp + (spp < state.target ? '/' + state.target : '') + ' spp'
       + orbitInfo;
   }
@@ -395,7 +430,7 @@
     var p = localPos(e);
     var before = toDisk(p[0], p[1]);
     var f = Math.exp(e.deltaY * 0.0012);
-    state.scale = Math.min(0.05 * state.model.extent, Math.max(1e-7 * state.model.extent, state.scale * f));
+    state.scale = Math.min(0.05 * state.model.extent, Math.max(1e-13 * state.model.extent, state.scale * f));
     var after = toDisk(p[0], p[1]);
     state.center = [state.center[0] + before[0] - after[0],
                     state.center[1] + before[1] - after[1]];
@@ -429,6 +464,9 @@
   bind('sat', 'vSat', function (v) { state.sat = v; }, function (v) { return v.toFixed(2); });
   bind('val', 'vVal', function (v) { state.val = v; }, function (v) { return v.toFixed(2); });
   bind('glow', 'vGlow', function (v) { state.glow = v; }, function (v) { return v.toFixed(2); });
+  bind('shade', 'vShade', function (v) { state.shade = v; }, function (v) { return v.toFixed(2); });
+  bind('shadeScale', 'vShadeScale', function (v) { state.shadeScale = v; },
+       function (v) { return v.toFixed(3); });
   bind('glowW', 'vGlowW', function (v) { state.glowW = v; }, function (v) { return v.toFixed(3); });
   bind('ss', 'vSS', function (v) { state.ss = v; }, function (v) { return v + '\u00d7' + v; });
   bind('target', 'vTarget', function (v) { state.target = Math.pow(2, v); },
