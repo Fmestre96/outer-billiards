@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <circle cx="32" cy="32" r="31" fill="#0a0c12"/>
+  <!-- five itinerary sectors, split along the rays through the vertices -->
+  <g fill="none" stroke-width="15" stroke-dasharray="27.646 110.584" transform="rotate(-90 32 32)">
+    <circle cx="32" cy="32" r="22" stroke="#ff6b6b" stroke-dashoffset="0"/>
+    <circle cx="32" cy="32" r="22" stroke="#ffd166" stroke-dashoffset="-27.646"/>
+    <circle cx="32" cy="32" r="22" stroke="#62ff9b" stroke-dashoffset="-55.292"/>
+    <circle cx="32" cy="32" r="22" stroke="#6ee7ff" stroke-dashoffset="-82.938"/>
+    <circle cx="32" cy="32" r="22" stroke="#b07bff" stroke-dashoffset="-110.584"/>
+  </g>
+  <circle cx="32" cy="32" r="30.5" fill="none" stroke="#0a0c12" stroke-width="3"/>
+  <polygon points="32,19 44.37,27.98 39.64,42.52 24.36,42.52 19.63,27.98"
+           fill="#eef2ff" stroke="#0a0c12" stroke-width="2" stroke-linejoin="round"/>
+</svg>
