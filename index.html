@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Hyperbolic Outer Billiards</title>
+<link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+<div id="stage">
+  <canvas id="gl"></canvas>
+  <canvas id="overlay"></canvas>
+  <div id="hud"></div>
+  <div id="warn" class="hidden">polygon is not convex &mdash; the tangent-vertex rule is ambiguous</div>
+</div>
+
+<aside id="panel">
+  <div id="tabs">
+    <button class="tab active" data-geom="hyperbolic">Hyperbolic</button>
+    <button class="tab" data-geom="euclidean">Euclidean</button>
+  </div>
+  <h1 id="title">Hyperbolic Outer Billiards</h1>
+  <p class="blurb" id="blurb">
+    Point reflection through the tangent vertex of a convex polygon in the
+    Poincar&eacute; disk. Every pixel is coloured by the fate of its orbit.
+  </p>
+
+  <section>
+    <h2>Table</h2>
+    <label>Sides <span class="val" id="vSides">5</span>
+      <input type="range" id="sides" min="3" max="12" step="1" value="5" />
+    </label>
+    <label>Circumradius <span class="val" id="vRad">1.20</span>
+      <input type="range" id="radius" min="0.1" max="4" step="0.01" value="1.2" />
+    </label>
+    <label>Twist <span class="val" id="vTwist">0&deg;</span>
+      <input type="range" id="twist" min="0" max="360" step="1" value="0" />
+    </label>
+    <button id="reshape">Reset to regular</button>
+    <p class="hint">Drag the white vertex handles to deform the table.</p>
+  </section>
+
+  <section>
+    <h2>Dynamics</h2>
+    <label>Iterations <span class="val" id="vIters">40</span>
+      <input type="range" id="iters" min="1" max="400" step="1" value="40" />
+    </label>
+    <label>Colouring
+      <select id="mode">
+        <option value="0">Itinerary (smooth)</option>
+        <option value="1">Itinerary (hashed cells)</option>
+        <option value="2">Period of orbit</option>
+        <option value="3">First tangent vertex</option>
+        <option value="4">Vertex at step k</option>
+        <option value="5">Max orbit radius</option>
+        <option value="6">Net displacement</option>
+      </select>
+    </label>
+    <label id="stepRow" class="off">Step k <span class="val" id="vStep">1</span>
+      <input type="range" id="step" min="1" max="400" step="1" value="1" />
+    </label>
+    <label id="epsRow" class="off">Return tolerance <span class="val" id="vEps">1e-6</span>
+      <input type="range" id="eps" min="-12" max="-2" step="0.25" value="-6" />
+    </label>
+  </section>
+  <section>
+    <h2>Colour</h2>
+    <label>Hue shift <span class="val" id="vHue">0.00</span>
+      <input type="range" id="hue" min="0" max="1" step="0.005" value="0" />
+    </label>
+    <label>Hue scale <span class="val" id="vCScale">0.15</span>
+      <input type="range" id="cscale" min="0.005" max="1" step="0.005" value="0.15" />
+    </label>
+    <label>Saturation <span class="val" id="vSat">0.72</span>
+      <input type="range" id="sat" min="0" max="1" step="0.01" value="0.72" />
+    </label>
+    <label>Brightness <span class="val" id="vVal">1.00</span>
+      <input type="range" id="val" min="0.2" max="1.4" step="0.01" value="1" />
+    </label>
+    <label>Supersampling <span class="val" id="vSS">2&times;2</span>
+      <input type="range" id="ss" min="1" max="4" step="1" value="2" />
+    </label>
+  </section>
+
+  <section>
+    <h2>Orbit probe</h2>
+    <p class="hint">Click anywhere outside the table to trace a single orbit.</p>
+    <label>Orbit length <span class="val" id="vOlen">60</span>
+      <input type="range" id="olen" min="2" max="400" step="1" value="60" />
+    </label>
+    <label class="row"><input type="checkbox" id="showPoly" checked /> show table &amp; handles</label>
+    <label class="row"><input type="checkbox" id="showOrbit" checked /> show orbit</label>
+    <button id="clearOrbit">Clear orbit</button>
+  </section>
+
+  <section>
+    <h2>View</h2>
+    <button id="resetView">Reset view</button>
+    <button id="savePng">Save PNG</button>
+    <p class="hint">Scroll to zoom, drag the background to pan.</p>
+  </section>
+</aside>
+
+<script src="js/hyperbolic.js"></script>
+<script src="js/shaders.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
