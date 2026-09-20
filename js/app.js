@@ -9,10 +9,10 @@
     model: HB.MODELS.hyperbolic,
     verts: [],
     sides: 5,
-    radius: 1.2,
+    radius: HB.MODELS.hyperbolic.defaultRadius,
     twist: 0,
     iters: 40,
-    mode: 0,
+    mode: 1,
     stepPick: 1,
     eps: 1e-6,
     hue: 0,
@@ -73,13 +73,14 @@
   gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
 
   var U = {};
-  ['uVerts', 'uKVerts', 'uN', 'uGeom', 'uIters', 'uMode', 'uStepPick', 'uSS', 'uCenter', 'uScale',
+  ['uKVerts', 'uHVerts', 'uN', 'uGeom', 'uIters', 'uMode', 'uStepPick', 'uSS', 'uCenter', 'uScale',
     'uResolution', 'uHueShift', 'uCScale', 'uSat', 'uVal', 'uEps', 'uBg', 'uTable']
     .forEach(function (n) { U[n] = gl.getUniformLocation(prog, n); });
 
   /* --------------------------------------------------------- table layout */
 
   var kverts = [];
+  var hverts = [];
 
   function rebuildTable() {
     // orient counter-clockwise so the tangency and inside tests agree
@@ -89,6 +90,7 @@
       k = state.verts.map(state.model.proj);
     }
     kverts = k;
+    hverts = state.verts.map(state.model.lift);
     state.convex = HB.isConvexKlein(k);
     warn.classList.toggle('hidden', state.convex);
   }
@@ -140,18 +142,18 @@
   }
 
   function draw() {
-    var flatP = new Float32Array(MAXV * 2);
     var flatK = new Float32Array(MAXV * 2);
+    var flatH = new Float32Array(MAXV * 3);
     for (var i = 0; i < state.verts.length && i < MAXV; i++) {
-      flatP[2 * i] = state.verts[i][0]; flatP[2 * i + 1] = state.verts[i][1];
       flatK[2 * i] = kverts[i][0]; flatK[2 * i + 1] = kverts[i][1];
+      flatH[3 * i] = hverts[i][0]; flatH[3 * i + 1] = hverts[i][1]; flatH[3 * i + 2] = hverts[i][2];
     }
 
     gl.viewport(0, 0, glCanvas.width, glCanvas.height);
     gl.useProgram(prog);
     gl.bindVertexArray(vao);
-    gl.uniform2fv(U.uVerts, flatP);
     gl.uniform2fv(U.uKVerts, flatK);
+    gl.uniform3fv(U.uHVerts, flatH);
     gl.uniform1i(U.uN, Math.min(state.verts.length, MAXV));
     gl.uniform1i(U.uGeom, state.model.id);
     gl.uniform1i(U.uIters, state.iters);
@@ -217,14 +219,15 @@
 
     orbitInfo = '';
     if (state.showOrbit && state.seed) {
-      var o = HB.orbit(state.model, state.verts, kverts, state.seed, state.olen);
+      var o = HB.orbit(state.model, hverts, kverts, state.seed, state.olen);
+      var pts = o.points.map(state.model.unproj);
       ctx.strokeStyle = 'rgba(255,255,255,0.85)';
       ctx.lineWidth = 1.25;
-      for (var k = 0; k + 1 < o.points.length; k++) {
-        strokeGeodesic(o.points[k], o.points[k + 1]);
+      for (var k = 0; k + 1 < pts.length; k++) {
+        strokeGeodesic(pts[k], pts[k + 1]);
       }
-      for (var m = 0; m < o.points.length; m++) {
-        var p = toScreen(o.points[m]);
+      for (var m = 0; m < pts.length; m++) {
+        var p = toScreen(pts[m]);
         ctx.beginPath();
         ctx.arc(p[0], p[1], m === 0 ? 4.5 : 2.2, 0, 2 * Math.PI);
         ctx.fillStyle = m === 0 ? '#6ee7ff' : 'rgba(255,255,255,0.9)';
@@ -232,7 +235,7 @@
       }
       var per = 0;
       for (var t = 1; t < o.points.length; t++) {
-        if (state.model.dist(o.points[t], o.points[0]) < 1e-6) { per = t; break; }
+        if (state.model.kdist(o.points[t], o.points[0]) < 1e-6) { per = t; break; }
       }
       orbitInfo = '  orbit: ' + (o.points.length - 1) + ' steps'
         + (per ? ', period ' + per : ', no return within ' + state.olen)

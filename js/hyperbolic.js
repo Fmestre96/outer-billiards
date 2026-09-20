@@ -10,13 +10,6 @@
 var HB = (function () {
   'use strict';
 
-  function cmul(a, b) { return [a[0] * b[0] - a[1] * b[1], a[0] * b[1] + a[1] * b[0]]; }
-
-  function cdiv(a, b) {
-    var d = b[0] * b[0] + b[1] * b[1];
-    return [(a[0] * b[0] + a[1] * b[1]) / d, (a[1] * b[0] - a[0] * b[1]) / d];
-  }
-
   function toKlein(z) {
     var s = 1 + z[0] * z[0] + z[1] * z[1];
     return [2 * z[0] / s, 2 * z[1] / s];
@@ -32,23 +25,27 @@ var HB = (function () {
   function hypRadius(z) { return 2 * Math.atanh(Math.min(0.999999999, Math.hypot(z[0], z[1]))); }
   function euclidRadius(r) { return Math.tanh(r / 2); }
 
-  function hypDist(a, b) {
-    var dx = a[0] - b[0], dy = a[1] - b[1];
-    var na = 1 - a[0] * a[0] - a[1] * a[1];
-    var nb = 1 - b[0] * b[0] - b[1] * b[1];
-    return Math.acosh(1 + 2 * (dx * dx + dy * dy) / (na * nb));
+  /*
+   * The outer billiard map is the point reflection through v (rotation by pi):
+   *   T(z) = (2v - (1+|v|^2) z) / ((1+|v|^2) - 2 conj(v) z)
+   * but iterating that in Poincare coordinates is hopeless: escaping orbits gain about
+   * 0.7 in hyperbolic radius per step, so 1-|z| underflows after ~50 steps even in double
+   * precision. On the hyperboloid the same map is the linear Lorentz map
+   *   X -> -(X + 2<X,V>V),   <V,V> = -1,
+   * which is division-free. Carried projectively as (k, 1) it keeps the Klein coordinates
+   * bounded and stays accurate indefinitely.
+   */
+  function lift(z) {
+    var r2 = z[0] * z[0] + z[1] * z[1], d = 1 - r2;
+    return [2 * z[0] / d, 2 * z[1] / d, (1 + r2) / d];
   }
 
-  /*
-   * Rotation by pi about v (the hyperbolic "point reflection"):
-   *   T(z) = (2v - (1+|v|^2) z) / ((1+|v|^2) - 2 conj(v) z)
-   */
-  function reflectPoint(z, v) {
-    var s = 1 + v[0] * v[0] + v[1] * v[1];
-    var num = [2 * v[0] - s * z[0], 2 * v[1] - s * z[1]];
-    var c = cmul([v[0], -v[1]], z);
-    var den = [s - 2 * c[0], -2 * c[1]];
-    return cdiv(num, den);
+  function lorentzStep(k, V) {
+    var a = k[0] * V[0] + k[1] * V[1] - V[2];
+    var x = -(k[0] + 2 * a * V[0]);
+    var y = -(k[1] + 2 * a * V[1]);
+    var w = -(1 + 2 * a * V[2]);
+    return [x / w, y / w];
   }
 
   function cross(ax, ay, bx, by) { return ax * by - ay * bx; }
@@ -100,23 +97,23 @@ var HB = (function () {
     return out;
   }
 
-  /* One step of the outer billiard map; returns null when z is inside the table. */
-  function step(model, verts, kverts, z) {
-    var kp = model.proj(z);
-    if (insideKlein(kverts, kp)) return null;
-    var i = supportVertex(kverts, kp);
-    return { vertex: i, next: model.map(z, verts[i]) };
+  /* One step of the outer billiard map; returns null when k is inside the table. */
+  function step(model, hverts, kverts, k) {
+    if (insideKlein(kverts, k)) return null;
+    var i = supportVertex(kverts, k);
+    return { vertex: i, next: model.stepK(k, hverts[i]) };
   }
 
-  function orbit(model, verts, kverts, z0, count) {
-    var pts = [z0.slice()], syms = [], z = z0.slice();
-    for (var k = 0; k < count; k++) {
-      var s = step(model, verts, kverts, z);
+  /* Traced in Klein coordinates, which is also what the overlay needs for straight edges. */
+  function orbit(model, hverts, kverts, z0, count) {
+    var k = model.proj(z0), pts = [k.slice()], syms = [];
+    for (var j = 0; j < count; j++) {
+      var s = step(model, hverts, kverts, k);
       if (!s) break;
-      z = s.next;
-      if (!isFinite(z[0]) || !isFinite(z[1]) || !model.valid(z)) break;
+      k = s.next;
+      if (!isFinite(k[0]) || !isFinite(k[1])) break;
       syms.push(s.vertex);
-      pts.push(z.slice());
+      pts.push(k.slice());
     }
     return { points: pts, symbols: syms };
   }
@@ -137,11 +134,19 @@ var HB = (function () {
       name: 'hyperbolic',
       title: 'Poincar\u00e9 disk',
       extent: 1.087,
-      defaultRadius: 1.2,
-      radiusRange: [0.1, 4, 0.01],
+      // large tables make every orbit escape at once, leaving only a flat fan;
+      // a small table is locally almost Euclidean and keeps the rich structure
+      defaultRadius: 0.4,
+      radiusRange: [0.05, 4, 0.01],
       proj: toKlein,
-      map: reflectPoint,
-      dist: hypDist,
+      unproj: fromKlein,
+      lift: lift,
+      stepK: lorentzStep,
+      kdist: function (a, b) {
+        var na = Math.max(1 - a[0] * a[0] - a[1] * a[1], 1e-300);
+        var nb = Math.max(1 - b[0] * b[0] - b[1] * b[1], 1e-300);
+        return Math.acosh(Math.max(1, (1 - a[0] * b[0] - a[1] * b[1]) / Math.sqrt(na * nb)));
+      },
       radius: hypRadius,
       samples: hypSamples,
       circumradius: euclidRadius,
@@ -159,8 +164,10 @@ var HB = (function () {
       defaultRadius: 1,
       radiusRange: [0.05, 4, 0.01],
       proj: function (z) { return z; },
-      map: function (z, v) { return [2 * v[0] - z[0], 2 * v[1] - z[1]]; },
-      dist: function (a, b) { return Math.hypot(a[0] - b[0], a[1] - b[1]); },
+      unproj: function (k) { return k; },
+      lift: function (z) { return [z[0], z[1], 0]; },
+      stepK: function (k, V) { return [2 * V[0] - k[0], 2 * V[1] - k[1]]; },
+      kdist: function (a, b) { return Math.hypot(a[0] - b[0], a[1] - b[1]); },
       radius: function (z) { return Math.hypot(z[0], z[1]); },
       samples: function (a, b) { return [a, b]; },
       circumradius: function (r) { return r; },
@@ -171,11 +178,10 @@ var HB = (function () {
 
   return {
     MODELS: MODELS,
-    cmul: cmul, cdiv: cdiv,
     toKlein: toKlein, fromKlein: fromKlein,
-    hypRadius: hypRadius, euclidRadius: euclidRadius, hypDist: hypDist,
-    reflectPoint: reflectPoint, supportVertex: supportVertex,
+    hypRadius: hypRadius, euclidRadius: euclidRadius,
+    supportVertex: supportVertex,
     insideKlein: insideKlein, signedAreaKlein: signedAreaKlein, isConvexKlein: isConvexKlein,
-    regularPolygon: regularPolygon, step: step, orbit: orbit
+    regularPolygon: regularPolygon, orbit: orbit
   };
 })();
