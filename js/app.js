@@ -11,6 +11,8 @@
     sides: 5,
     radius: HB.MODELS.hyperbolic.defaultRadius,
     twist: 0,
+    preset: 'regular',
+    kiteA: 0.382,
     iters: 300,
     hypPan: true,
     autoRefine: false,
@@ -149,6 +151,36 @@
 
   function makeRegular() {
     state.verts = HB.regularPolygon(state.model, state.sides, state.radius, Math.PI / 2 + state.twist);
+    rebuildTable();
+  }
+
+  /*
+   * Table presets beyond the regular n-gon. Raw shapes are defined in a fixed frame and then
+   * normalised to a unit circumradius about their centroid, so the existing radius slider
+   * scales them exactly like it scales a regular polygon.
+   */
+  var PRESET_SHAPES = {
+    // Schwartz's kite family K(A): for a dense set of irrational A satisfying a Diophantine
+    // condition, outer billiards on this quadrilateral has unbounded orbits. The default value
+    // is the golden-ratio parameter A = 1/phi^2 that Schwartz calls the Penrose kite.
+    kite: function (A) { return [[-1, 0], [0, -A], [1, 0], [0, 1]]; }
+  };
+
+  function normalizeShape(raw) {
+    var cx = 0, cy = 0, i;
+    for (i = 0; i < raw.length; i++) { cx += raw[i][0]; cy += raw[i][1]; }
+    cx /= raw.length; cy /= raw.length;
+    var centered = raw.map(function (p) { return [p[0] - cx, p[1] - cy]; });
+    var maxR = 0;
+    centered.forEach(function (p) { maxR = Math.max(maxR, Math.hypot(p[0], p[1])); });
+    return centered.map(function (p) { return [p[0] / maxR, p[1] / maxR]; });
+  }
+
+  function applyPreset() {
+    if (state.preset === 'regular') { makeRegular(); return; }
+    var norm = normalizeShape(PRESET_SHAPES.kite(state.kiteA));
+    var s = state.model.circumradius(state.radius);
+    state.verts = norm.map(function (p) { return [p[0] * s, p[1] * s]; });
     rebuildTable();
   }
 
@@ -532,9 +564,10 @@
     return el;
   }
 
-  bind('sides', 'vSides', function (v) { state.sides = v; makeRegular(); });
-  bind('radius', 'vRad', function (v) { state.radius = v; makeRegular(); }, function (v) { return v.toFixed(2); });
-  bind('twist', 'vTwist', function (v) { state.twist = v * Math.PI / 180; makeRegular(); }, function (v) { return v + '\u00b0'; });
+  bind('sides', 'vSides', function (v) { state.sides = v; applyPreset(); });
+  bind('radius', 'vRad', function (v) { state.radius = v; applyPreset(); }, function (v) { return v.toFixed(2); });
+  bind('twist', 'vTwist', function (v) { state.twist = v * Math.PI / 180; applyPreset(); }, function (v) { return v + '\u00b0'; });
+  bind('kiteA', 'vKiteA', function (v) { state.kiteA = v; applyPreset(); }, function (v) { return v.toFixed(3); });
   bind('iters', 'vIters', function (v) { state.iters = v; });
   bind('hypPan', null, function (v) { state.hypPan = v; });
   bind('autoRefine', null, function (v) { state.autoRefine = v; lastFrame = null; });
@@ -568,7 +601,13 @@
   });
   syncModeRows();
 
-  document.getElementById('reshape').addEventListener('click', function () { makeRegular(); render(); });
+  document.getElementById('reshape').addEventListener('click', function () {
+    state.preset = 'regular';
+    document.getElementById('preset').value = 'regular';
+    syncPresetRows();
+    makeRegular();
+    render();
+  });
   document.getElementById('clearOrbit').addEventListener('click', function () { state.seed = null; render(); });
   document.getElementById('resetView').addEventListener('click', function () { fitView(); render(); });
   document.getElementById('savePng').addEventListener('click', function () {
@@ -604,16 +643,45 @@
     document.getElementById('vSides').textContent = state.sides;
     document.getElementById('twist').value = Math.round(state.twist * 180 / Math.PI);
     document.getElementById('vTwist').textContent = Math.round(state.twist * 180 / Math.PI) + '\u00b0';
+    document.getElementById('preset').value = state.preset;
+    document.getElementById('kiteA').value = state.kiteA;
+    document.getElementById('vKiteA').textContent = state.kiteA.toFixed(3);
+    syncPresetRows();
     var t = TEXT[state.model.name];
     document.getElementById('title').textContent = t[0];
     document.getElementById('blurb').textContent = t[1];
   }
+
+  var PRESET_HINTS = {
+    regular: 'Drag the white vertex handles to deform the table.',
+    kite: 'Schwartz\u2019s kite family K(A): vertices (\u22121,0), (0,\u2212A), (1,0), (0,1). '
+        + 'For a dense set of irrational A satisfying a Diophantine condition \u2014 including '
+        + 'the golden-ratio value here, the Penrose kite \u2014 outer billiards has unbounded orbits.'
+  };
+
+  function syncPresetRows() {
+    var p = state.preset;
+    document.getElementById('sidesRow').classList.toggle('off', p !== 'regular');
+    document.getElementById('twistRow').classList.toggle('off', p !== 'regular');
+    document.getElementById('kiteRow').classList.toggle('off', p !== 'kite');
+    document.getElementById('radiusLabel').firstChild.textContent = p === 'regular' ? 'Circumradius ' : 'Size ';
+    document.getElementById('presetHint').textContent = PRESET_HINTS[p];
+  }
+
+  document.getElementById('preset').addEventListener('change', function (e) {
+    state.preset = e.target.value;
+    syncPresetRows();
+    applyPreset();
+    render();
+  });
+  syncPresetRows();
 
   function switchGeom(name) {
     if (state.model.name === name) return;
     saved[state.model.name] = {
       verts: state.verts.map(function (v) { return v.slice(); }),
       sides: state.sides, radius: state.radius, twist: state.twist,
+      preset: state.preset, kiteA: state.kiteA,
       center: state.center.slice(), scale: state.scale, seed: state.seed,
       cam: state.cam.slice()
     };
@@ -621,11 +689,13 @@
     var s = saved[name];
     if (s) {
       state.verts = s.verts; state.sides = s.sides; state.radius = s.radius; state.twist = s.twist;
+      state.preset = s.preset; state.kiteA = s.kiteA;
       state.center = s.center; state.scale = s.scale; state.seed = s.seed;
       state.cam = s.cam;
       rebuildTable();
     } else {
       state.radius = state.model.defaultRadius;
+      state.preset = 'regular';
       state.seed = null;
       state.cam = HB.matIdentity();
       makeRegular();
